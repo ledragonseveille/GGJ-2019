@@ -2,6 +2,8 @@ import libtcodpy as libtcod
 
 
 def handle_keys(key):
+    """ Handle the keyboard inputs of the player """
+
     key_char = chr(key.c)
 
     # Movement keys
@@ -24,7 +26,7 @@ def handle_keys(key):
 
     # Non-movement keys
     if key.vk == libtcod.KEY_ENTER and key.lalt:
-        # Alt+Enter: toggle fullscreen mode
+        # left Alt + Enter: toggle fullscreen mode
         return {"fullscreen": True}
 
     if key.vk == libtcod.KEY_ESCAPE:
@@ -34,6 +36,39 @@ def handle_keys(key):
     # If no key pressed...
     return {}
 
+
+class Tile:
+    """ A tile on the map.
+        It may or may not be blocked,
+        and may or may not block sight."""
+
+    def __init__(self, blocked, block_sight=None):
+        self.blocked = blocked
+        # By default, if a tile is blocked, it also blocks sight
+        if block_sight is None:
+            block_sight = blocked
+        self.block_sight = block_sight
+        # Specify if the tile has been explored by the player or not
+        self.explored = False
+
+
+class GameMap:
+    """ Game map creation """
+
+    def __init__(self, width, height):
+        self.width = width
+        self.height = height
+        self.tiles = self._initialize_tiles()
+
+    def _initialize_tiles(self):
+        tiles = [[Tile(True) for y in range(self.height)]
+                 for x in range(self.width)]
+        return tiles
+
+    def make_map(self, max_rooms, room_min_size, room_max_size,
+                 map_width, map_height, player, entities,
+                 max_monsters_per_room):
+        """ Procedural generation of the rooms """
 
 def main():
     # Constants definition
@@ -74,6 +109,7 @@ def main():
     con = libtcod.console_new(SCREEN_WIDTH, SCREEN_HEIGHT)
 
     # Game's map init
+    game_map = GameMap(MAP_WIDTH, MAP_HEIGHT)
 
     # Holding keyboard and mouse input
     key = libtcod.Key()
