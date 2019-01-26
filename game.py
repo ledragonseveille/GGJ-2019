@@ -60,6 +60,74 @@ def recompute_fov(fov_map, x, y, radius, light_walls=True, algorithm=0):
     libtcod.map_compute_fov(fov_map, x, y, radius, light_walls, algorithm)
 
 
+def render_all(con, entities, game_map, fov_map, fov_recompute, screen_width, screen_height, colors):
+    """ Draw all entities in the list and in the fov """
+
+    if fov_recompute:
+        for y in range(game_map.height):
+            for x in range(game_map.width):
+                is_visible = libtcod.map_is_in_fov(fov_map, x, y)
+                is_wall = game_map.tiles[x][y].block_sight
+
+                if is_visible:
+                    if is_wall:
+                        libtcod.console_set_char_background(con,
+                                                            x,
+                                                            y,
+                                                            colors.get("light_wall"),
+                                                            libtcod.BKGND_SET)
+                    else:
+                        libtcod.console_set_char_background(con,
+                                                            x,
+                                                            y,
+                                                            colors.get("light_ground"),
+                                                            libtcod.BKGND_SET)
+                    game_map.tiles[x][y].explored = True
+                elif game_map.tiles[x][y].explored:
+                    if is_wall:
+                        libtcod.console_set_char_background(con,
+                                                            x,
+                                                            y,
+                                                            colors.get("dark_wall"),
+                                                            libtcod.BKGND_SET)
+                    else:
+                        libtcod.console_set_char_background(con,
+                                                            x,
+                                                            y,
+                                                            colors.get("dark_ground"),
+                                                            libtcod.BKGND_SET)
+
+    for entity in entities:
+        _draw_entity(con, entity, fov_map)
+
+    libtcod.console_blit(con, 0, 0, screen_width, screen_height, 0, 0, 0)
+
+
+def clear_all(con, entities):
+    """ Erase all entities in the list """
+
+    for entity in entities:
+        _clear_entity(con, entity)
+
+
+def _draw_entity(con, entity, fov_map):
+    """ Draw the character that represents this object """
+
+    if libtcod.map_is_in_fov(fov_map, entity.x, entity.y):
+        libtcod.console_set_default_foreground(con, entity.color)
+        libtcod.console_put_char(con,
+                                 entity.x,
+                                 entity.y,
+                                 entity.char,
+                                 libtcod.BKGND_NONE)
+
+
+def _clear_entity(con, entity):
+    """ Erase the character that represents this object """
+
+    libtcod.console_put_char(con, entity.x, entity.y, " ", libtcod.BKGND_NONE)
+
+
 class Fighter:
     """ Fighter component """
 
@@ -446,12 +514,31 @@ def main():
                                     mouse)
 
         # Recompute fov if needed
+        if fov_recompute:
+            recompute_fov(fov_map,
+                          player.x,
+                          player.y,
+                          FOV_RADIUS,
+                          FOV_LIGHT_WALLS,
+                          FOV_ALGORITHM)
 
         # Render all
+        render_all(con,
+                   entities,
+                   game_map,
+                   fov_map,
+                   fov_recompute,
+                   SCREEN_WIDTH,
+                   SCREEN_HEIGHT,
+                   colors)
 
+        fov_recompute = False
+
+        # Present everything on the screen
         libtcod.console_flush()
 
-        # Clear entities
+        # Clear entities (to avoid trailing traces)
+        clear_all(con, entities)
 
         # Manage events
         action = handle_keys(key)
@@ -460,14 +547,36 @@ def main():
         exit = action.get("exit")
         fullscreen = action.get("fullscreen")
 
-        if move:
-            pass
+        if move and game_state == GameStates.PLAYER_TURN:
+            dx, dy = move
+            destination_x = player.x + dx
+            destination_y = player.y + dy
+
+            if not game_map.is_blocked(destination_x, destination_y):
+                target = get_blocking_entities_at_location(entities,
+                                                           destination_x,
+                                                           destination_y)
+
+                if target:
+                    print("You kick the " + target.name + " in the shins, much to its annoyance!")
+                else:
+                    player.move(dx, dy)
+                    fov_recompute = True
+
+                game_state = GameStates.ENEMY_TURN
 
         if exit:
             return True
 
         if fullscreen:
             libtcod.console_set_fullscreen(not libtcod.console_is_fullscreen)
+
+        if game_state == GameStates.ENEMY_TURN:
+            for entity in entities:
+                if entity.ai:
+                    entity.ai.take_turn(player, fov_map, game_map, entities)
+
+            game_state = GameStates.PLAYER_TURN
 
 
 if __name__ == '__main__':
