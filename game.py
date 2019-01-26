@@ -2,6 +2,7 @@ import libtcodpy as libtcod
 from random import randint
 from enum import Enum
 import math
+import textwrap
 
 
 def handle_keys(key):
@@ -60,7 +61,70 @@ def recompute_fov(fov_map, x, y, radius, light_walls=True, algorithm=0):
     libtcod.map_compute_fov(fov_map, x, y, radius, light_walls, algorithm)
 
 
-def render_all(con, entities, player, game_map, fov_map, fov_recompute, screen_width, screen_height, colors):
+class RenderOrder(Enum):
+    """ Rendering order of the entities """
+
+    CORPSE = 1
+    ITEM = 2
+    ACTOR = 3
+
+
+def get_names_under_mouse(mouse, entities, fov_map):
+    """ Get the name of the item under the mouse """
+
+    (x, y) = (mouse.cx, mouse.cy)
+    names = [entity.name for entity in entities
+             if entity.x == x and entity.y == y
+             and libtcod.map_is_in_fov(fov_map, entity.x, entity.y)]
+    names = ", ".join(names)
+
+    return names.capitalize()
+
+
+def render_bar(panel,
+               x,
+               y,
+               total_width,
+               name,
+               value,
+               maximum,
+               bar_color,
+               back_color):
+    """ Function to render any kind of bar """
+
+    bar_width = int(float(value) / maximum * total_width)
+
+    libtcod.console_set_default_background(panel, back_color)
+    libtcod.console_rect(panel, x, y, total_width, 1, False, libtcod.BKGND_SCREEN)
+
+    libtcod.console_set_default_background(panel, bar_color)
+    if bar_width > 0:
+        libtcod.console_rect(panel, x, y, bar_width, 1, False, libtcod.BKGND_SCREEN)
+
+    libtcod.console_set_default_foreground(panel, libtcod.white)
+    libtcod.console_print_ex(panel,
+                             int(x + total_width / 2),
+                             y,
+                             libtcod.BKGND_NONE,
+                             libtcod.CENTER,
+                             '{0}: {1}/{2}'.format(name, value, maximum))
+
+
+def render_all(con,
+               panel,
+               entities,
+               player,
+               game_map,
+               fov_map,
+               fov_recompute,
+               message_log,
+               screen_width,
+               screen_height,
+               bar_width,
+               panel_height,
+               panel_y,
+               mouse,
+               colors):
     """ Draw all entities in the list and in the fov """
 
     if fov_recompute:
@@ -97,17 +161,48 @@ def render_all(con, entities, player, game_map, fov_map, fov_recompute, screen_w
                                                             colors.get("dark_ground"),
                                                             libtcod.BKGND_SET)
 
-    for entity in entities:
+    entities_in_render_order = sorted(entities,
+                                      key=lambda x: x.render_order.value)
+
+    for entity in entities_in_render_order:
         _draw_entity(con, entity, fov_map)
 
-    libtcod.console_set_default_foreground(con, libtcod.white)
-    libtcod.console_print_ex(con,
+    libtcod.console_blit(con, 0, 0, screen_width, screen_height, 0, 0, 0)
+
+    libtcod.console_set_default_background(panel, libtcod.black)
+    libtcod.console_clear(panel)
+
+    # Print the game messages, one line at a time
+    y = 1
+    for message in message_log.messages:
+        libtcod.console_set_default_foreground(panel, message.color)
+        libtcod.console_print_ex(panel,
+                                 message_log.x,
+                                 y,
+                                 libtcod.BKGND_NONE,
+                                 libtcod.LEFT,
+                                 message.text)
+        y += 1
+
+    render_bar(panel,
+               1,
+               1,
+               bar_width,
+               "HP",
+               player.fighter.hp,
+               player.fighter.max_hp,
+               libtcod.light_red,
+               libtcod.dark_red)
+
+    libtcod.console_set_default_foreground(panel, libtcod.light_gray)
+    libtcod.console_print_ex(panel,
                              1,
-                             screen_height - 2,
+                             0,
                              libtcod.BKGND_NONE,
                              libtcod.LEFT,
-                             "HP: {0:02}/{1:02}".format(player.fighter.hp, player.fighter.max_hp))
-    libtcod.console_blit(con, 0, 0, screen_width, screen_height, 0, 0, 0)
+                             get_names_under_mouse(mouse, entities, fov_map))
+
+    libtcod.console_blit(panel, 0, 0, screen_width, panel_height, 0, 0, panel_y)
 
 
 def clear_all(con, entities):
@@ -136,20 +231,26 @@ def _clear_entity(con, entity):
 
 
 def kill_player(player):
+    """ Player settings when dead """
+
     player.char = "%"
     player.color = libtcod.dark_red
 
-    return "You died...", GameStates.PLAYER_DEAD
+    return Message("You died...", libtcod.red), GameStates.PLAYER_DEAD
 
 
 def kill_monster(monster):
-    death_message = f"{monster.name.capitalize()} is dead!"
+    """ Monster settings when dead """
+
+    death_message = Message(f"{monster.name.capitalize()} is dead!",
+                            libtcod.orange)
     monster.char = "%"
     monster.color = libtcod.dark_red
     monster.blocks = False
     monster.fighter = None
     monster.ai = None
     monster.name = "remains of " + monster.name
+    monster.render_order = RenderOrder.CORPSE
 
     return death_message
 
@@ -176,10 +277,10 @@ class Fighter:
         damage = self.power - target.fighter.defense
 
         if damage > 0:
-            results.append({"message": f"{self.owner.name.capitalize()} attacks {target.name} for {str(damage)} hit points."})
+            results.append({"message": Message(f"{self.owner.name.capitalize()} attacks {target.name} for {str(damage)} hit points.", libtcod.white)})
             results.extend(target.fighter.take_damage(damage))
         else:
-            results.append({"message": f"{self.owner.name.capitalize()} attacks {target.name} but does no damage."})
+            results.append({"message": Message(f"{self.owner.name.capitalize()} attacks {target.name} but does no damage.", libtcod.white)})
 
         return results
 
@@ -210,13 +311,23 @@ class BasicMonster:
 class Entity:
     """ A generic object to represent players, enemies, items, etc. """
 
-    def __init__(self, x, y, char, color, name, blocks=False, fighter=None, ai=None):
+    def __init__(self,
+                 x,
+                 y,
+                 char,
+                 color,
+                 name,
+                 blocks=False,
+                 render_order=RenderOrder.CORPSE,
+                 fighter=None,
+                 ai=None):
         self.x = x
         self.y = y
         self.char = char
         self.color = color
         self.name = name
         self.blocks = blocks
+        self.render_order = render_order
         self.fighter = fighter
         self.ai = ai
 
@@ -465,6 +576,7 @@ class GameMap:
                                      libtcod.desaturated_green,
                                      "Small nightmare",
                                      blocks=True,
+                                     render_order=RenderOrder.ACTOR,
                                      fighter=fighter_component,
                                      ai=ai_component)
                 else:
@@ -476,6 +588,7 @@ class GameMap:
                                      libtcod.darker_green,
                                      "Big nightmare",
                                      blocks=True,
+                                     render_order=RenderOrder.ACTOR,
                                      fighter=fighter_component,
                                      ai=ai_component)
 
@@ -487,12 +600,45 @@ class GameMap:
         return False
 
 
+class Message:
+    def __init__(self, text, color=libtcod.white):
+        self.text = text
+        self.color = color
+
+
+class MessageLog:
+    def __init__(self, x, width, height):
+        self.messages = []
+        self.x = x
+        self.width = width
+        self.height = height
+
+    def add_message(self, message):
+        # Split the message if necessary, among multiple lines
+        new_msg_lines = textwrap.wrap(message.text, self.width)
+
+        for line in new_msg_lines:
+            # If the buffer is full, remove the first line
+            # to make room for the new one
+            if len(self.messages) == self.height:
+                del self.messages[0]
+
+            # Add the new line as a Message object, with the text and the color
+            self.messages.append(Message(line, message.color))
+
+
 def main():
     # Const definition
     SCREEN_WIDTH = 80
     SCREEN_HEIGHT = 50
+    BAR_WIDTH = 20
+    PANEL_HEIGHT = 7
+    PANEL_Y = SCREEN_HEIGHT - PANEL_HEIGHT
+    MESSAGE_X = BAR_WIDTH + 2
+    MESSAGE_WIDTH = SCREEN_WIDTH - BAR_WIDTH - 2
+    MESSAGE_HEIGHT = PANEL_HEIGHT - 1
     MAP_WIDTH = 80
-    MAP_HEIGHT = 45
+    MAP_HEIGHT = 43
     ROOM_MAX_SIZE = 10
     ROOM_MIN_SIZE = 6
     MAX_ROOMS = 30
@@ -517,6 +663,7 @@ def main():
                     libtcod.white,
                     "Player",
                     blocks=True,
+                    render_order=RenderOrder.ACTOR,
                     fighter=fighter_component)
     entities = [player]
 
@@ -531,8 +678,9 @@ def main():
                               "Selen's dream",
                               False)
 
-    # Creation of the main console
+    # Creation of the consoles
     con = libtcod.console_new(SCREEN_WIDTH, SCREEN_HEIGHT)
+    panel = libtcod.console_new(SCREEN_WIDTH, PANEL_HEIGHT)
 
     # Game's map init
     game_map = GameMap(MAP_WIDTH, MAP_HEIGHT)
@@ -549,6 +697,9 @@ def main():
     fov_recompute = True
     fov_map = initialize_fov(game_map)
 
+    # message log init
+    message_log = MessageLog(MESSAGE_X, MESSAGE_WIDTH, MESSAGE_HEIGHT)
+
     # Holding keyboard and mouse input
     key = libtcod.Key()
     mouse = libtcod.Mouse()
@@ -559,7 +710,7 @@ def main():
     # Main game Loop
     while not libtcod.console_is_window_closed():
         # Capture new events
-        libtcod.sys_check_for_event(libtcod.EVENT_KEY_PRESS,
+        libtcod.sys_check_for_event(libtcod.EVENT_KEY_PRESS | libtcod.EVENT_MOUSE,
                                     key,
                                     mouse)
 
@@ -574,13 +725,19 @@ def main():
 
         # Render all
         render_all(con,
+                   panel,
                    entities,
                    player,
                    game_map,
                    fov_map,
                    fov_recompute,
+                   message_log,
                    SCREEN_WIDTH,
                    SCREEN_HEIGHT,
+                   BAR_WIDTH,
+                   PANEL_HEIGHT,
+                   PANEL_Y,
+                   mouse,
                    colors)
 
         fov_recompute = False
@@ -630,14 +787,14 @@ def main():
             dead_entity = player_turn_result.get("dead")
 
             if message:
-                print(message)
+                message_log.add_message(message)
 
             if dead_entity:
                 if dead_entity == player:
                     message, game_state = kill_player(dead_entity)
                 else:
                     message = kill_monster(dead_entity)
-                print(message)
+                message_log.add_message(message)
 
         if game_state == GameStates.ENEMY_TURN:
             for entity in entities:
@@ -651,14 +808,14 @@ def main():
                         dead_entity = enemy_turn_result.get("dead")
 
                         if message:
-                            print(message)
+                            message_log.add_message(message)
 
                         if dead_entity:
                             if dead_entity == player:
                                 message, game_state = kill_player(dead_entity)
                             else:
                                 message = kill_monster(dead_entity)
-                            print(message)
+                            message_log.add_message(message)
                             if game_state == GameStates.PLAYER_DEAD:
                                 break
                     if game_state == GameStates.PLAYER_DEAD:
