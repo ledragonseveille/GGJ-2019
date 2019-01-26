@@ -60,7 +60,7 @@ def recompute_fov(fov_map, x, y, radius, light_walls=True, algorithm=0):
     libtcod.map_compute_fov(fov_map, x, y, radius, light_walls, algorithm)
 
 
-def render_all(con, entities, game_map, fov_map, fov_recompute, screen_width, screen_height, colors):
+def render_all(con, entities, player, game_map, fov_map, fov_recompute, screen_width, screen_height, colors):
     """ Draw all entities in the list and in the fov """
 
     if fov_recompute:
@@ -100,6 +100,13 @@ def render_all(con, entities, game_map, fov_map, fov_recompute, screen_width, sc
     for entity in entities:
         _draw_entity(con, entity, fov_map)
 
+    libtcod.console_set_default_foreground(con, libtcod.white)
+    libtcod.console_print_ex(con,
+                             1,
+                             screen_height - 2,
+                             libtcod.BKGND_NONE,
+                             libtcod.LEFT,
+                             "HP: {0:02}/{1:02}".format(player.fighter.hp, player.fighter.max_hp))
     libtcod.console_blit(con, 0, 0, screen_width, screen_height, 0, 0, 0)
 
 
@@ -128,33 +135,76 @@ def _clear_entity(con, entity):
     libtcod.console_put_char(con, entity.x, entity.y, " ", libtcod.BKGND_NONE)
 
 
+def kill_player(player):
+    player.char = "%"
+    player.color = libtcod.dark_red
+
+    return "You died...", GameStates.PLAYER_DEAD
+
+
+def kill_monster(monster):
+    death_message = f"{monster.name.capitalize()} is dead!"
+    monster.char = "%"
+    monster.color = libtcod.dark_red
+    monster.blocks = False
+    monster.fighter = None
+    monster.ai = None
+    monster.name = "remains of " + monster.name
+
+    return death_message
+
+
 class Fighter:
     """ Fighter component """
 
     def __init__(self, hp, defense, power):
+        self.max_hp = hp
         self.hp = hp
         self.defense = defense
         self.power = power
 
     def take_damage(self, amount):
+        results = []
         self.hp -= amount
+
+        if self.hp <= 0:
+            results.append({"dead": self.owner})
+        return results
+
+    def attack(self, target):
+        results = []
+        damage = self.power - target.fighter.defense
+
+        if damage > 0:
+            results.append({"message": f"{self.owner.name.capitalize()} attacks {target.name} for {str(damage)} hit points."})
+            results.extend(target.fighter.take_damage(damage))
+        else:
+            results.append({"message": f"{self.owner.name.capitalize()} attacks {target.name} but does no damage."})
+
+        return results
 
 
 class GameStates(Enum):
     PLAYER_TURN = 1
     ENEMY_TURN = 2
+    PLAYER_DEAD = 3
 
 
 class BasicMonster:
     """ Basic ai for monsters """
 
     def take_turn(self, target, fov_map, game_map, entities):
+        results = []
         monster = self.owner
+
         if libtcod.map_is_in_fov(fov_map, monster.x, monster.y):
             if monster.distance_to(target) >= 2:
                 monster.move_astar(target, entities, game_map)
             elif target.fighter.hp > 0:
-                print("the {0} insults you! Your ego is damaged!".format(monster.name))
+                attack_results = monster.fighter.attack(target)
+                results.extend(attack_results)
+
+        return results
 
 
 class Entity:
@@ -422,7 +472,7 @@ class GameMap:
                     ai_component = BasicMonster()
                     monster = Entity(x,
                                      y,
-                                     "%",
+                                     "&",
                                      libtcod.darker_green,
                                      "Big nightmare",
                                      blocks=True,
@@ -438,7 +488,7 @@ class GameMap:
 
 
 def main():
-    # Constants definition
+    # Const definition
     SCREEN_WIDTH = 80
     SCREEN_HEIGHT = 50
     MAP_WIDTH = 80
@@ -525,6 +575,7 @@ def main():
         # Render all
         render_all(con,
                    entities,
+                   player,
                    game_map,
                    fov_map,
                    fov_recompute,
@@ -547,6 +598,8 @@ def main():
         exit = action.get("exit")
         fullscreen = action.get("fullscreen")
 
+        player_turn_results = []
+
         if move and game_state == GameStates.PLAYER_TURN:
             dx, dy = move
             destination_x = player.x + dx
@@ -558,7 +611,8 @@ def main():
                                                            destination_y)
 
                 if target:
-                    print("You kick the " + target.name + " in the shins, much to its annoyance!")
+                    attack_results = player.fighter.attack(target)
+                    player_turn_results.extend(attack_results)
                 else:
                     player.move(dx, dy)
                     fov_recompute = True
@@ -571,12 +625,46 @@ def main():
         if fullscreen:
             libtcod.console_set_fullscreen(not libtcod.console_is_fullscreen)
 
+        for player_turn_result in player_turn_results:
+            message = player_turn_result.get("message")
+            dead_entity = player_turn_result.get("dead")
+
+            if message:
+                print(message)
+
+            if dead_entity:
+                if dead_entity == player:
+                    message, game_state = kill_player(dead_entity)
+                else:
+                    message = kill_monster(dead_entity)
+                print(message)
+
         if game_state == GameStates.ENEMY_TURN:
             for entity in entities:
                 if entity.ai:
-                    entity.ai.take_turn(player, fov_map, game_map, entities)
+                    enemy_turn_results = entity.ai.take_turn(player,
+                                        fov_map,
+                                        game_map,
+                                        entities)
+                    for enemy_turn_result in enemy_turn_results:
+                        message = enemy_turn_result.get("message")
+                        dead_entity = enemy_turn_result.get("dead")
 
-            game_state = GameStates.PLAYER_TURN
+                        if message:
+                            print(message)
+
+                        if dead_entity:
+                            if dead_entity == player:
+                                message, game_state = kill_player(dead_entity)
+                            else:
+                                message = kill_monster(dead_entity)
+                            print(message)
+                            if game_state == GameStates.PLAYER_DEAD:
+                                break
+                    if game_state == GameStates.PLAYER_DEAD:
+                        break
+            else:
+                game_state = GameStates.PLAYER_TURN
 
 
 if __name__ == '__main__':
