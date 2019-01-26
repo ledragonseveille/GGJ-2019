@@ -261,6 +261,10 @@ def kill_monster(monster):
 def use_item(entity, player):
     """ Item settings when used """
 
+    player.fighter.hp += entity.item.healing
+    if player.fighter.hp > player.fighter.max_hp:
+        player.fighter.hp = player.fighter.max_hp
+
     use_message = Message(f"{entity.name} used", libtcod.white)
     entity.char = "."
     entity.name = "remains of " + entity.name
