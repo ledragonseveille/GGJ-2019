@@ -694,6 +694,7 @@ def main():
     FOV_ALGORITHM = 1
     FOV_LIGHT_WALLS = True
     FOV_RADIUS = 6
+    FOV_MONSTER_RADIUS = 3
     MAX_MONSTERS_PER_ROOM = 3
     MAX_ITEMS_PER_ROOM = 2
 
@@ -747,6 +748,7 @@ def main():
     # field of view init
     fov_recompute = True
     fov_map = initialize_fov(game_map)
+    fov_monster_map = initialize_fov(game_map)
 
     # message log init
     message_log = MessageLog(MESSAGE_X, MESSAGE_WIDTH, MESSAGE_HEIGHT)
@@ -771,6 +773,12 @@ def main():
                           player.x,
                           player.y,
                           FOV_RADIUS,
+                          FOV_LIGHT_WALLS,
+                          FOV_ALGORITHM)
+            recompute_fov(fov_monster_map,
+                          player.x,
+                          player.y,
+                          FOV_MONSTER_RADIUS,
                           FOV_LIGHT_WALLS,
                           FOV_ALGORITHM)
 
@@ -858,9 +866,9 @@ def main():
             for entity in entities:
                 if entity.ai:
                     enemy_turn_results = entity.ai.take_turn(player,
-                                        fov_map,
-                                        game_map,
-                                        entities)
+                                                             fov_monster_map,
+                                                             game_map,
+                                                             entities)
                     for enemy_turn_result in enemy_turn_results:
                         message = enemy_turn_result.get("message")
                         dead_entity = enemy_turn_result.get("dead")
