@@ -29,6 +29,9 @@ def handle_keys(key):
         return {"move": (1, 1)}
 
     # Non-movement keys
+    if key_char == "g":
+        return {"pickup": True}
+
     if key.vk == libtcod.KEY_ENTER and key.lalt:
         # left Alt + Enter: toggle fullscreen mode
         return {"fullscreen": True}
@@ -42,7 +45,7 @@ def handle_keys(key):
 
 
 def initialize_fov(game_map):
-    """ Fiel of view initialization """
+    """ Field of view initialization """
 
     fov_map = libtcod.map_new(game_map.width, game_map.height)
 
@@ -255,6 +258,17 @@ def kill_monster(monster):
     return death_message
 
 
+def use_item(entity, player):
+    """ Item settings when used """
+
+    use_message = Message(f"{entity.name} used", libtcod.white)
+    entity.char = "."
+    entity.name = "remains of " + entity.name
+    entity.item = None
+
+    return use_message
+
+
 class Fighter:
     """ Fighter component """
 
@@ -308,6 +322,11 @@ class BasicMonster:
         return results
 
 
+class Item:
+    def __init__(self, healing=0):
+        self.healing = healing
+
+
 class Entity:
     """ A generic object to represent players, enemies, items, etc. """
 
@@ -320,7 +339,8 @@ class Entity:
                  blocks=False,
                  render_order=RenderOrder.CORPSE,
                  fighter=None,
-                 ai=None):
+                 ai=None,
+                 item=None):
         self.x = x
         self.y = y
         self.char = char
@@ -330,12 +350,16 @@ class Entity:
         self.render_order = render_order
         self.fighter = fighter
         self.ai = ai
+        self.item = item
 
         if self.fighter:
             self.fighter.owner = self
 
         if self.ai:
             self.ai.owner = self
+
+        if self.item:
+            self.item.owner = self
 
     def move(self, dx, dy):
         """ Move the entity by a given amount """
@@ -608,12 +632,14 @@ class GameMap:
 
             if not any([entity for entity in entities
                         if entity.x == x and entity.y == y]):
+                item_component = Item(healing=5)
                 item = Entity(x,
                               y,
                               '!',
                               libtcod.violet,
                               'Healing Potion',
-                              render_order=RenderOrder.ITEM)
+                              render_order=RenderOrder.ITEM,
+                              item=item_component)
 
                 entities.append(item)
 
@@ -777,6 +803,7 @@ def main():
         action = handle_keys(key)
 
         move = action.get("move")
+        pickup = action.get("pickup")
         exit = action.get("exit")
         fullscreen = action.get("fullscreen")
 
@@ -800,6 +827,12 @@ def main():
                     fov_recompute = True
 
                 game_state = GameStates.ENEMY_TURN
+
+        elif pickup and game_state == GameStates.PLAYER_TURN:
+            for entity in entities:
+                if entity.item and entity.x == player.x and entity.y == player.y:
+                    message = use_item(entity, player)
+                    message_log.add_message(message)
 
         if exit:
             return True
