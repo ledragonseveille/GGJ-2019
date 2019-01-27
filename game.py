@@ -3,6 +3,7 @@ from random import randint
 from enum import Enum
 import math
 import textwrap
+import pygame
 
 
 def handle_keys(key):
@@ -104,7 +105,7 @@ def render_bar(panel,
     if bar_width > 0:
         libtcod.console_rect(panel, x, y, bar_width, 1, False, libtcod.BKGND_SCREEN)
 
-    libtcod.console_set_default_foreground(panel, libtcod.white)
+    libtcod.console_set_default_foreground(panel, libtcod.darker_gray)
     libtcod.console_print_ex(panel,
                              int(x + total_width / 2),
                              y,
@@ -129,6 +130,8 @@ def render_all(con,
                mouse,
                colors):
     """ Draw all entities in the list and in the fov """
+
+    # libtcod.console_set_default_background(con, libtcod.white)
 
     if fov_recompute:
         for y in range(game_map.height):
@@ -172,7 +175,7 @@ def render_all(con,
 
     libtcod.console_blit(con, 0, 0, screen_width, screen_height, 0, 0, 0)
 
-    libtcod.console_set_default_background(panel, libtcod.black)
+    libtcod.console_set_default_background(panel, libtcod.lightest_sepia)
     libtcod.console_clear(panel)
 
     # Print the game messages, one line at a time
@@ -191,13 +194,13 @@ def render_all(con,
                1,
                1,
                bar_width,
-               "HP",
+               "Zen points",
                player.fighter.hp,
                player.fighter.max_hp,
                libtcod.light_red,
                libtcod.dark_red)
 
-    libtcod.console_set_default_foreground(panel, libtcod.light_gray)
+    libtcod.console_set_default_foreground(panel, libtcod.darker_gray)
     libtcod.console_print_ex(panel,
                              1,
                              0,
@@ -239,37 +242,39 @@ def kill_player(player):
     player.char = "%"
     player.color = libtcod.dark_red
 
-    return Message("You died...", libtcod.red), GameStates.PLAYER_DEAD
+    return Message("Selen se reveille en sursaut, stressee... mauvaise nuit...", libtcod.red), GameStates.PLAYER_DEAD
 
 
 def kill_monster(monster):
     """ Monster settings when dead """
 
-    death_message = Message(f"{monster.name.capitalize()} is dead!",
+    death_message = Message(f"{monster.name.capitalize()} s evanouit dans les tenebres !",
                             libtcod.orange)
     monster.char = "%"
     monster.color = libtcod.dark_red
     monster.blocks = False
     monster.fighter = None
     monster.ai = None
-    monster.name = "remains of " + monster.name
+    monster.name = "Restes de " + monster.name
     monster.render_order = RenderOrder.CORPSE
 
     return death_message
 
 
-def use_item(entity, player, new_fov_radius, max_fov_radius):
+def use_item(entity, player, new_fov_radius, max_fov_radius, sound):
     """ Item settings when used """
 
     player.fighter.hp += entity.item.healing
     if player.fighter.hp > player.fighter.max_hp:
         player.fighter.hp = player.fighter.max_hp
 
+    sound.play()
+
     new_fov_radius = max_fov_radius
 
-    use_message = Message(f"{entity.name} used", libtcod.white)
+    use_message = Message(f"{entity.name} utilisee, Selen regagne de la serenite !!!", libtcod.darkest_grey)
     entity.char = "."
-    entity.name = "remains of " + entity.name
+    entity.name = "Restes de " + entity.name
     entity.item = None
 
     return use_message, new_fov_radius
@@ -292,15 +297,16 @@ class Fighter:
             results.append({"dead": self.owner})
         return results
 
-    def attack(self, target):
+    def attack(self, target, sound):
         results = []
         damage = self.power - target.fighter.defense
 
         if damage > 0:
-            results.append({"message": Message(f"{self.owner.name.capitalize()} attacks {target.name} for {str(damage)} hit points.", libtcod.white)})
+            results.append({"message": Message(f"{self.owner.name.capitalize()} attaque {target.name} pour {str(damage)} points de degats.", libtcod.darkest_grey)})
             results.extend(target.fighter.take_damage(damage))
+            sound.play()
         else:
-            results.append({"message": Message(f"{self.owner.name.capitalize()} attacks {target.name} but does no damage.", libtcod.white)})
+            results.append({"message": Message(f"{self.owner.name.capitalize()} attaque {target.name} mais ne fait aucun degat.", libtcod.darkest_grey)})
 
         return results
 
@@ -314,15 +320,18 @@ class GameStates(Enum):
 class BasicMonster:
     """ Basic ai for monsters """
 
-    def take_turn(self, target, fov_map, game_map, entities):
+    def take_turn(self, target, fov_map, game_map, entities, sound):
         results = []
         monster = self.owner
+        monster.color = libtcod.darkest_grey
 
         if libtcod.map_is_in_fov(fov_map, monster.x, monster.y):
+            # Monster color changes to red when chasing or attacking
+            monster.color = libtcod.dark_red
             if monster.distance_to(target) >= 2:
                 monster.move_astar(target, entities, game_map)
             elif target.fighter.hp > 0:
-                attack_results = monster.fighter.attack(target)
+                attack_results = monster.fighter.attack(target, sound)
                 results.extend(attack_results)
 
         return results
@@ -611,8 +620,8 @@ class GameMap:
                     monster = Entity(x,
                                      y,
                                      "#",
-                                     libtcod.desaturated_green,
-                                     "Small nightmare",
+                                     libtcod.darkest_grey,
+                                     "Petit cauchemar",
                                      blocks=True,
                                      render_order=RenderOrder.ACTOR,
                                      fighter=fighter_component,
@@ -623,8 +632,8 @@ class GameMap:
                     monster = Entity(x,
                                      y,
                                      "&",
-                                     libtcod.darker_green,
-                                     "Big nightmare",
+                                     libtcod.darkest_grey,
+                                     "Gros cauchemar",
                                      blocks=True,
                                      render_order=RenderOrder.ACTOR,
                                      fighter=fighter_component,
@@ -642,8 +651,8 @@ class GameMap:
                 item = Entity(x,
                               y,
                               '!',
-                              libtcod.violet,
-                              'Healing Potion',
+                              libtcod.dark_orange,
+                              'Poudre de reve',
                               render_order=RenderOrder.ITEM,
                               item=item_component)
 
@@ -656,7 +665,7 @@ class GameMap:
 
 
 class Message:
-    def __init__(self, text, color=libtcod.white):
+    def __init__(self, text, color=libtcod.darkest_grey):
         self.text = text
         self.color = color
 
@@ -683,6 +692,16 @@ class MessageLog:
 
 
 def main():
+    # pygame sound system init
+    pygame.mixer.init(44100)
+    sound_hurt = pygame.mixer.Sound("sound_selen_aie.wav")
+    sound_holala = pygame.mixer.Sound("sound_selen_holala.wav")
+    sound_nightmare = pygame.mixer.Sound("sound_nightmares.wav")
+    sound_steps = pygame.mixer.Sound("pas2.wav")
+    sound_steps.set_volume(0.5)
+    pygame.mixer.music.load("theme.wav")
+    pygame.mixer.music.set_volume(0.5)
+
     # Const definition
     SCREEN_WIDTH = 80
     SCREEN_HEIGHT = 50
@@ -710,10 +729,10 @@ def main():
 
     # Colors dict
     colors = {
-        "dark_wall": libtcod.Color(0, 0, 100),
-        "dark_ground": libtcod.Color(50, 50, 150),
-        "light_wall": libtcod.Color(130, 110, 50),
-        "light_ground": libtcod.Color(200, 180, 50),
+        "dark_wall": libtcod.light_sepia,
+        "dark_ground": libtcod.lighter_sepia,
+        "light_wall": libtcod.lighter_sepia,
+        "light_ground": libtcod.lightest_sepia,
     }
 
     # Entities init
@@ -722,7 +741,7 @@ def main():
                     0,
                     "@",
                     libtcod.white,
-                    "Player",
+                    "Selen",
                     blocks=True,
                     render_order=RenderOrder.ACTOR,
                     fighter=fighter_component)
@@ -736,7 +755,7 @@ def main():
     # Creation of the screen
     libtcod.console_init_root(SCREEN_WIDTH,
                               SCREEN_HEIGHT,
-                              "Selen's dream",
+                              "Selen dans les limbes",
                               False)
 
     # Creation of the consoles
@@ -769,6 +788,8 @@ def main():
 
     # Game state init
     game_state = GameStates.PLAYER_TURN
+
+    pygame.mixer.music.play(-1)
 
     # Main game Loop
     while not libtcod.console_is_window_closed():
@@ -838,14 +859,15 @@ def main():
                                                            destination_y)
 
                 if target:
-                    attack_results = player.fighter.attack(target)
+                    attack_results = player.fighter.attack(target, sound_nightmare)
                     player_turn_results.extend(attack_results)
                 else:
                     player.move(dx, dy)
+                    sound_steps.play()
                     fov_recompute = True
                     # FOV radius decrease every 4 moves
                     count += 1
-                    if count >= 4:
+                    if count >= 8:
                         count = 0
                         fov_radius_change -= 1
                     if fov_radius_change <= 3:
@@ -856,10 +878,15 @@ def main():
         elif pickup and game_state == GameStates.PLAYER_TURN:
             for entity in entities:
                 if entity.item and entity.x == player.x and entity.y == player.y:
-                    message, fov_radius_change = use_item(entity, player, fov_radius_change, FOV_RADIUS)
+                    message, fov_radius_change = use_item(entity,
+                                                          player,
+                                                          fov_radius_change,
+                                                          FOV_RADIUS,
+                                                          sound_holala)
                     message_log.add_message(message)
 
         if exit:
+            pygame.mixer.music.stop()
             return True
 
         if fullscreen:
@@ -885,7 +912,8 @@ def main():
                     enemy_turn_results = entity.ai.take_turn(player,
                                                              fov_monster_map,
                                                              game_map,
-                                                             entities)
+                                                             entities,
+                                                             sound_hurt)
                     for enemy_turn_result in enemy_turn_results:
                         message = enemy_turn_result.get("message")
                         dead_entity = enemy_turn_result.get("dead")
