@@ -258,19 +258,21 @@ def kill_monster(monster):
     return death_message
 
 
-def use_item(entity, player):
+def use_item(entity, player, new_fov_radius, max_fov_radius):
     """ Item settings when used """
 
     player.fighter.hp += entity.item.healing
     if player.fighter.hp > player.fighter.max_hp:
         player.fighter.hp = player.fighter.max_hp
 
+    new_fov_radius = max_fov_radius
+
     use_message = Message(f"{entity.name} used", libtcod.white)
     entity.char = "."
     entity.name = "remains of " + entity.name
     entity.item = None
 
-    return use_message
+    return use_message, new_fov_radius
 
 
 class Fighter:
@@ -702,6 +704,10 @@ def main():
     MAX_MONSTERS_PER_ROOM = 3
     MAX_ITEMS_PER_ROOM = 2
 
+    # FOV radius decrease variables
+    fov_radius_change = FOV_RADIUS
+    count = 0
+
     # Colors dict
     colors = {
         "dark_wall": libtcod.Color(0, 0, 100),
@@ -776,7 +782,7 @@ def main():
             recompute_fov(fov_map,
                           player.x,
                           player.y,
-                          FOV_RADIUS,
+                          fov_radius_change,
                           FOV_LIGHT_WALLS,
                           FOV_ALGORITHM)
             recompute_fov(fov_monster_map,
@@ -837,13 +843,20 @@ def main():
                 else:
                     player.move(dx, dy)
                     fov_recompute = True
+                    # FOV radius decrease every 4 moves
+                    count += 1
+                    if count >= 4:
+                        count = 0
+                        fov_radius_change -= 1
+                    if fov_radius_change <= 3:
+                        fov_radius_change = 3
 
                 game_state = GameStates.ENEMY_TURN
 
         elif pickup and game_state == GameStates.PLAYER_TURN:
             for entity in entities:
                 if entity.item and entity.x == player.x and entity.y == player.y:
-                    message = use_item(entity, player)
+                    message, fov_radius_change = use_item(entity, player, fov_radius_change, FOV_RADIUS)
                     message_log.add_message(message)
 
         if exit:
